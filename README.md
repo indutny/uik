@@ -2,6 +2,8 @@
 
 Voting data for [2020 Russian Constitutional Referedum][referendum].
 
+See [observablehq page][analysis] for the interactive data analysis.
+
 ## How to collect
 
 ```sh
@@ -46,3 +48,4 @@ USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 [referendum]: http://www.vybory.izbirkom.ru/region/izbirkom?action=show&global=1&vrn=100100163596966&region=0&prver=0&pronetvd=null
 [puppeteer]: https://github.com/puppeteer/puppeteer
+[analysis]: https://observablehq.com/@indutny/2020-russian-constitutional-referendum
