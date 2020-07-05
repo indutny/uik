@@ -6,7 +6,7 @@ const debug = require('debug')('uik');
 const { spawnSync } = require('child_process');
 const fs = require('fs');
 
-const POOL_SIZE = 8;
+const POOL_SIZE = 16;
 
 const ROOT_URI = 'http://www.vybory.izbirkom.ru/region/region/izbirkom?' +
   'action=show&root=1&tvd=100100163596969&vrn=100100163596966';
@@ -122,94 +122,153 @@ async function loadSubregion(page, stream, options) {
 
   await goto(page, getSubregionResults(subregion));
 
-  const rowSelector = 'table table div > table tr';
-  const stats = await page.$$eval(rowSelector, (rows) => {
-    rows = rows.filter((row) => row.children.length !== 0);
-    if (rows.length < 8) {
-      return [];
+  const stationsSelector = 'table table div > table tr:nth-child(1) td';
+  const stations = await page.$$eval(stationsSelector, (columns) => {
+    return columns.map((column) => {
+      const a = column.querySelector('a');
+      return {
+        id: a.href.match(/&vibid=(\d+)/)[1],
+        name: a.textContent.trim(),
+      };
+    });
+  });
+
+  const leftColumnSelector = 'table table td > table[align="left"] ' +
+    'tr:not(:nth-child(1)) td:nth-child(3)';
+  const left = await page.$$eval(leftColumnSelector, (rows) => {
+    return rows.map((row) => {
+      const b = row.querySelector('b');
+
+      return b ? b.textContent.trim() : undefined;
+    });
+  });
+  if (left.length % 7 !== 0) {
+    throw new Error('Unexpected overflow columns length!');
+  }
+
+  const overflow = [];
+  for (let i = 7; i < left.length; i += 7) {
+    overflow.push(left.slice(i, i + 7));
+  }
+
+  const rightRowSelector = 'table table div > table tr:not(:nth-child(1))';
+  const right = await page.$$eval(rightRowSelector, (rows) => {
+    if (rows.length % 7 !== 0) {
+      throw new Error('Unexpected rows length!');
     }
 
-    const names = Array.from(rows[0].children).map((elem) => elem.textContent);
-    const ids = Array.from(rows[0].children).map((elem) => {
-      return elem.querySelector('a').href.match(/&vibid=(\d+)/)[1];
-    });
-
-    const registered = Array.from(rows[1].children)
-      .map((elem) => parseInt(elem.textContent, 10));
-    const attended = Array.from(rows[2].children)
-      .map((elem) => parseInt(elem.textContent, 10));
-    const voted = Array.from(rows[3].children)
-      .map((elem) => parseInt(elem.textContent, 10));
-    const invalid = Array.from(rows[4].children)
-      .map((elem) => parseInt(elem.textContent, 10));
-
-    const yes = Array.from(rows[6].children).map((elem) => {
-      const b = elem.querySelector('b');
-      if (!b) {
-        return undefined;
-      }
-
-      return parseInt(b.textContent, 10);
-    });
-    const no = Array.from(rows[7].children).map((elem) => {
-      const b = elem.querySelector('b');
-      if (!b) {
-        return undefined;
-      }
-
-      return parseInt(b.textContent, 10);
-    });
-
     const out = [];
-    for (const [ i, name ] of names.entries()) {
-      out.push({
-        name,
-        id: ids[i],
-        registered: registered[i] || 0,
-        attended: attended[i] || 0,
-        voted: voted[i] || 0,
-        invalid: invalid[i] || 0,
+    for (let i = 0; i < rows.length; i += 7) {
+      const chunk = rows.slice(i, i + 7);
+      const columns = [];
 
-        yes: yes[i] || 0,
-        no: no[i] || 0,
-      });
+      // NOTE: Skip #4, because it is empty
+      let min = Math.min(
+        chunk[0].children.length,
+        chunk[1].children.length,
+        chunk[2].children.length,
+        chunk[3].children.length,
+        chunk[5].children.length,
+        chunk[6].children.length);
+
+      for (let j = 0; j < min; j++) {
+        columns.push(chunk.map((row) => {
+          if (!row.children[j]) {
+            return undefined;
+          }
+          const b = row.children[j].querySelector('b');
+
+          return b ? b.textContent.trim() : undefined;
+        }));
+      }
+
+      // Skip empty columns
+      if (columns.length === 0) {
+        continue;
+      }
+
+      out.push(columns);
     }
     return out;
   });
 
-  for (const line of stats) {
-    const columns = {
-      region: options.region,
-      subregion: options.subregion,
-      station: line.id,
+  let merged = [];
+  for (const columns of right) {
+    merged = merged.concat(columns);
+    if (overflow.length !== 0) {
+      merged = merged.concat([ overflow.shift() ]);
+    }
+  }
+  while (overflow.length !== 0) {
+    merged = merged.concat([ overflow.shift() ]);
+  }
 
-      regionName: options.regionName,
-      subregionName: options.subregionName,
-      stationName: line.name,
+  if (merged.length !== stations.length) {
+    throw new Error(`Unexpected station/merged mismatch: ` +
+      `${merged.length} != ${stations.length}`);
+  }
 
-      registered: line.registered,
-      attended: line.attended,
-      voted: line.voted,
-      invalid: line.invalid,
-      yes: line.yes,
-      no: line.no,
+  const stats = stations.map(({ name, id }, i) => {
+    const column = merged[i];
+    return {
+      name,
+      id,
+      registered: parseInt(column[0], 10),
+      attended: parseInt(column[1], 10),
+      voted: parseInt(column[2], 10),
+      invalid: parseInt(column[3], 10),
+      yes: parseInt(column[5], 10),
+      no: parseInt(column[6], 10),
     };
+  });
 
-    stream.write(JSON.stringify(columns) + ',\n');
+  for (const line of stats) {
+    const columns = [
+      options.region,
+      options.subregion,
+      line.id,
+
+      options.regionName,
+      options.subregionName,
+      line.name,
+
+      line.registered,
+      line.attended,
+      line.voted,
+      line.invalid,
+      line.yes,
+      line.no,
+    ];
+
+    const csv = columns.map((column) => {
+      if (typeof column === 'string') {
+        return JSON.stringify(column);
+      } else if (column === undefined) {
+        console.error(columns);
+        throw new Error('wtf?');
+      } else {
+        return column.toString();
+      }
+    });
+
+    stream.write(csv.join(', ') + '\n');
   }
 }
 
 async function main() {
-  const stream = fs.createWriteStream('data.json');
+  const stream = fs.createWriteStream('data.csv');
 
   const browser = await puppeteer.launch({
     headless: false,
   });
 
-  stream.write('[\n');
+  stream.write('region id, subregion id, station id, region name, ' +
+    'subregion name, station name, registered, attended, ' +
+    'voted, invalid, yes, no\n');
 
   const pool = new Pool(browser, POOL_SIZE);
   await pool.start();
+
   let regions;
 
   {
@@ -287,8 +346,9 @@ async function main() {
   }
 
   debug('done');
-  stream.write('undefined\n');
-  stream.end(']\n');
+  stream.close();
+
+  await browser.close();
 }
 
 main().catch((e) => {
