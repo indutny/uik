@@ -195,7 +195,7 @@ async function loadSubregion(page, stream, options) {
       no: line.no,
     };
 
-    stream.write(JSON.stringify(columns) + '\n');
+    stream.write(JSON.stringify(columns) + ',\n');
   }
 }
 
@@ -287,6 +287,7 @@ async function main() {
   }
 
   debug('done');
+  stream.write('undefined\n');
   stream.end(']\n');
 }
 
