@@ -124,18 +124,20 @@ async function loadSubregion(page, stream, options) {
       return elem.querySelector('a').href.match(/&vibid=(\d+)/)[1];
     });
 
-    const registered = Array.from(rows[1].children)
+    const last = rows.slice(-7);
+
+    const registered = Array.from(last[0].children)
       .map((elem) => parseInt(elem.textContent, 10));
-    const came = Array.from(rows[2].children)
+    const attended = Array.from(last[1].children)
       .map((elem) => parseInt(elem.textContent, 10));
-    const voted = Array.from(rows[3].children)
+    const voted = Array.from(last[2].children)
       .map((elem) => parseInt(elem.textContent, 10));
-    const invalid = Array.from(rows[4].children)
+    const invalid = Array.from(last[3].children)
       .map((elem) => parseInt(elem.textContent, 10));
 
-    const yes = Array.from(rows[6].children)
+    const yes = Array.from(last[5].children)
       .map((elem) => parseInt(elem.querySelector('b').textContent, 10));
-    const no = Array.from(rows[7].children)
+    const no = Array.from(last[6].children)
       .map((elem) => parseInt(elem.querySelector('b').textContent, 10));
 
     const out = [];
@@ -143,13 +145,13 @@ async function loadSubregion(page, stream, options) {
       out.push({
         name,
         id: ids[i],
-        registered: registered[i],
-        came: came[i],
-        voted: voted[i],
-        invalid: invalid[i],
+        registered: registered[i] || 0,
+        attended: attended[i] || 0,
+        voted: voted[i] || 0,
+        invalid: invalid[i] || 0,
 
-        yes: yes[i],
-        no: no[i],
+        yes: yes[i] || 0,
+        no: no[i] || 0,
       });
     }
     return out;
@@ -166,7 +168,7 @@ async function loadSubregion(page, stream, options) {
       line.name,
 
       line.registered,
-      line.came,
+      line.attended,
       line.voted,
       line.invalid,
       line.yes,
@@ -196,7 +198,7 @@ async function main() {
   });
 
   stream.write('region name, subregion name, station name, region id, ' +
-    'subregion id, station id, registered, came, voted, invalid, yes, no\n');
+    'subregion id, station id, registered, attended, voted, invalid, yes, no\n');
 
   const pool = new Pool(browser, POOL_SIZE);
   await pool.start();
