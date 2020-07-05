@@ -11,6 +11,11 @@ const POOL_SIZE = 8;
 const ROOT_URI = 'http://www.vybory.izbirkom.ru/region/region/izbirkom?' +
   'action=show&root=1&tvd=100100163596969&vrn=100100163596966';
 
+const EXCEPTION_REGIONS = [
+  '100100164050019', // "98 Город Байконур (Республика Казахстан)"
+  '100100164050020', // "99 Территория за пределами РФ"
+];
+
 class Pool {
   constructor(browser, size) {
     this.browser = browser;
@@ -119,26 +124,41 @@ async function loadSubregion(page, stream, options) {
 
   const rowSelector = 'table table div > table tr';
   const stats = await page.$$eval(rowSelector, (rows) => {
+    rows = rows.filter((row) => row.children.length !== 0);
+    if (rows.length < 8) {
+      return [];
+    }
+
     const names = Array.from(rows[0].children).map((elem) => elem.textContent);
     const ids = Array.from(rows[0].children).map((elem) => {
       return elem.querySelector('a').href.match(/&vibid=(\d+)/)[1];
     });
 
-    const last = rows.slice(-7);
-
-    const registered = Array.from(last[0].children)
+    const registered = Array.from(rows[1].children)
       .map((elem) => parseInt(elem.textContent, 10));
-    const attended = Array.from(last[1].children)
+    const attended = Array.from(rows[2].children)
       .map((elem) => parseInt(elem.textContent, 10));
-    const voted = Array.from(last[2].children)
+    const voted = Array.from(rows[3].children)
       .map((elem) => parseInt(elem.textContent, 10));
-    const invalid = Array.from(last[3].children)
+    const invalid = Array.from(rows[4].children)
       .map((elem) => parseInt(elem.textContent, 10));
 
-    const yes = Array.from(last[5].children)
-      .map((elem) => parseInt(elem.querySelector('b').textContent, 10));
-    const no = Array.from(last[6].children)
-      .map((elem) => parseInt(elem.querySelector('b').textContent, 10));
+    const yes = Array.from(rows[6].children).map((elem) => {
+      const b = elem.querySelector('b');
+      if (!b) {
+        return undefined;
+      }
+
+      return parseInt(b.textContent, 10);
+    });
+    const no = Array.from(rows[7].children).map((elem) => {
+      const b = elem.querySelector('b');
+      if (!b) {
+        return undefined;
+      }
+
+      return parseInt(b.textContent, 10);
+    });
 
     const out = [];
     for (const [ i, name ] of names.entries()) {
@@ -158,47 +178,35 @@ async function loadSubregion(page, stream, options) {
   });
 
   for (const line of stats) {
-    const columns = [
-      options.region,
-      options.subregion,
-      line.id,
+    const columns = {
+      region: options.region,
+      subregion: options.subregion,
+      station: line.id,
 
-      options.regionName,
-      options.subregionName,
-      line.name,
+      regionName: options.regionName,
+      subregionName: options.subregionName,
+      stationName: line.name,
 
-      line.registered,
-      line.attended,
-      line.voted,
-      line.invalid,
-      line.yes,
-      line.no,
-    ];
+      registered: line.registered,
+      attended: line.attended,
+      voted: line.voted,
+      invalid: line.invalid,
+      yes: line.yes,
+      no: line.no,
+    };
 
-    const csv = columns.map((column) => {
-      if (typeof column === 'string') {
-        return JSON.stringify(column);
-      } else if (column === undefined) {
-        console.error(columns);
-        throw new Error('wtf?');
-      } else {
-        return column.toString();
-      }
-    });
-
-    stream.write(csv.join(', ') + '\n');
+    stream.write(JSON.stringify(columns) + '\n');
   }
 }
 
 async function main() {
-  const stream = fs.createWriteStream('data.csv');
+  const stream = fs.createWriteStream('data.json');
 
   const browser = await puppeteer.launch({
     headless: false,
   });
 
-  stream.write('region name, subregion name, station name, region id, ' +
-    'subregion id, station id, registered, attended, voted, invalid, yes, no\n');
+  stream.write('[\n');
 
   const pool = new Pool(browser, POOL_SIZE);
   await pool.start();
@@ -233,7 +241,10 @@ async function main() {
   for (const { name: regionName, region } of regions) {
     let subregions;
 
-    {
+    if (EXCEPTION_REGIONS.includes(region)) {
+      debug(`exceptional region: ${regionName}/${region}`);
+      subregions = [ { name: regionName, subregion: region } ];
+    } else {
       const page = await pool.get();
 
       debug(`loading region's root page: ${regionName}/${region}`);
@@ -276,7 +287,7 @@ async function main() {
   }
 
   debug('done');
-  stream.close();
+  stream.end(']\n');
 }
 
 main().catch((e) => {
