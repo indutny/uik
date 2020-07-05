@@ -6,8 +6,46 @@ const debug = require('debug')('uik');
 const { spawnSync } = require('child_process');
 const fs = require('fs');
 
+const POOL_SIZE = 8;
+
 const ROOT_URI = 'http://www.vybory.izbirkom.ru/region/region/izbirkom?' +
   'action=show&root=1&tvd=100100163596969&vrn=100100163596966';
+
+class Pool {
+  constructor(browser, size) {
+    this.browser = browser;
+    this.size = size;
+
+    this.pages = [];
+    this.queue = [];
+  }
+
+  async start() {
+    for (let i = 0; i < this.size; i++) {
+      const page = await this.browser.newPage();
+      this.pages.push(page);
+    }
+  }
+
+  async get() {
+    if (this.pages.length) {
+      return this.pages.shift();
+    }
+
+    return await new Promise((resolve) => {
+      this.queue.push(resolve);
+    });
+  }
+
+  release(page) {
+    if (this.queue.length === 0) {
+      this.pages.push(page);
+      return;
+    }
+
+    this.queue.shift()(page);
+  }
+}
 
 function getRegionRoot(region) {
   return 'http://www.vybory.izbirkom.ru/region/amur?' +
@@ -28,7 +66,10 @@ function getStationResults(subregion, station) {
 async function goto(page, uri) {
   for (;;) {
     try {
-      await page.goto(uri);
+      await page.goto(uri, {
+        waitUntil: 'domcontentloaded',
+        timeout: 15000,
+      });
       break;
     } catch (err) {
       debug('failed to load page, retrying', err.stack);
@@ -135,6 +176,9 @@ async function loadSubregion(page, stream, options) {
     const csv = columns.map((column) => {
       if (typeof column === 'string') {
         return JSON.stringify(column);
+      } else if (column === undefined) {
+        console.error(columns);
+        throw new Error('wtf?');
       } else {
         return column.toString();
       }
@@ -151,35 +195,19 @@ async function main() {
     headless: false,
   });
 
-  const page = await browser.newPage();
   stream.write('region name, subregion name, station name, region id, ' +
     'subregion id, station id, registered, came, voted, invalid, yes, no\n');
 
-  debug('fetching regions');
-  await goto(page, ROOT_URI);
-  const regionOptions = await page.$$eval(
-    'form[name="go_reg"] option',
-    (elems) => {
-      return elems.map((elem) => {
-        return { name: elem.textContent, value: elem.value };
-      });
-    });
+  const pool = new Pool(browser, POOL_SIZE);
+  await pool.start();
+  let regions;
 
-  const regions = regionOptions.map((option) => {
-    const match = option.value.match(/&tvd=(\d+)/);
-    if (!match) {
-      return false;
-    }
+  {
+    const page = await pool.get();
 
-    return { name: option.name, region: match[1] };
-  }).filter((x) => x);
-  debug(`total region count: ${regions.length}`);
-
-  for (const { name: regionName, region } of regions) {
-    debug(`loading region's root page: ${regionName}/${region}`);
-    await goto(page, getRegionRoot(region));
-
-    const subregionOptions = await page.$$eval(
+    debug('fetching regions');
+    await goto(page, ROOT_URI);
+    const regionOptions = await page.$$eval(
       'form[name="go_reg"] option',
       (elems) => {
         return elems.map((elem) => {
@@ -187,24 +215,62 @@ async function main() {
         });
       });
 
-    const subregions = subregionOptions.map((option) => {
+    regions = regionOptions.map((option) => {
       const match = option.value.match(/&tvd=(\d+)/);
       if (!match) {
         return false;
       }
 
-      return { name: option.name, subregion: match[1] };
+      return { name: option.name.trim(), region: match[1] };
     }).filter((x) => x);
-    debug(`total subregion count: ${subregions.length}`);
+    debug(`total region count: ${regions.length}`);
 
-    for (const { name: subregionName, subregion } of subregions) {
+    pool.release(page);
+  }
+
+  for (const { name: regionName, region } of regions) {
+    let subregions;
+
+    {
+      const page = await pool.get();
+
+      debug(`loading region's root page: ${regionName}/${region}`);
+      await goto(page, getRegionRoot(region));
+
+      const subregionOptions = await page.$$eval(
+        'form[name="go_reg"] option',
+        (elems) => {
+          return elems.map((elem) => {
+            return { name: elem.textContent, value: elem.value };
+          });
+        });
+
+      subregions = subregionOptions.map((option) => {
+        const match = option.value.match(/&tvd=(\d+)/);
+        if (!match) {
+          return false;
+        }
+
+        return { name: option.name.trim(), subregion: match[1] };
+      }).filter((x) => x);
+      debug(`total subregion count: ${subregions.length}`);
+
+      pool.release(page);
+    }
+
+    await Promise.all(subregions.map(async (entry) => {
+      const { name: subregionName, subregion } = entry;
+      const page = await pool.get();
+
       await loadSubregion(page, stream, {
         regionName,
         region,
         subregionName,
         subregion,
       });
-    }
+
+      pool.release(page);
+    }));
   }
 
   debug('done');
@@ -213,5 +279,4 @@ async function main() {
 
 main().catch((e) => {
   console.error(e.stack);
-  process.exit(1);
 });
