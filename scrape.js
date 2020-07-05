@@ -251,7 +251,7 @@ async function loadSubregion(page, stream, options) {
       }
     });
 
-    stream.write(csv.join(', ') + '\n');
+    stream.write(csv.join(',') + '\n');
   }
 }
 
@@ -262,9 +262,9 @@ async function main() {
     headless: false,
   });
 
-  stream.write('region id, subregion id, station id, region name, ' +
-    'subregion name, station name, registered, attended, ' +
-    'voted, invalid, yes, no\n');
+  stream.write('region id,subregion id,station id,region name,' +
+    'subregion name,station name,registered,attended,' +
+    'voted,invalid,yes,no\n');
 
   const pool = new Pool(browser, POOL_SIZE);
   await pool.start();
