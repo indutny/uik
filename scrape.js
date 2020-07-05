@@ -90,7 +90,8 @@ async function goto(page, uri) {
     debug('captcha required');
     await new Promise((resolve, reject) => {
       read({
-        prompt: 'Awaiting solved captcha',
+        prompt: 'Captcha is required. Please solve it in the browser window ' +
+          'and press [Enter] key here',
       }, (err) => {
         if (err) {
           return reject(err);

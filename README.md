@@ -1,6 +1,23 @@
 # UIK
 
-WIP
+Voting data for [2020 Russian Constitutional Referedum][referendum].
+
+## How to collect
+
+```sh
+git clone git://github.com/indutny/uik
+cd uik
+npm install
+node scrape.js
+```
+
+The script will open a browser window (using [puppeteer][]) and will ask you
+to enter captcha (likely only once). All data will be written to `data.csv` file
+in the current working directory.
+
+_(NOTE: Since data is downloaded using 16 browser windows - its order might
+differ from the one in this repository. You can check that the data is the same
+by sorting the rows of the csv file)_
 
 ## LICENSE
 
@@ -26,3 +43,6 @@ NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
 DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
 OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+[referedum]: http://www.vybory.izbirkom.ru/region/izbirkom?action=show&global=1&vrn=100100163596966&region=0&prver=0&pronetvd=null
+[puppeteer]: https://github.com/puppeteer/puppeteer
