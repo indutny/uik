@@ -11,15 +11,13 @@ git clone git://github.com/indutny/uik
 cd uik
 npm install
 node scrape.js
+node normalize.js data.csv data-norm.csv
+mv data-norm.csv data.csv
 ```
 
 The script will open a browser window (using [puppeteer][]) and will ask you
 to enter captcha (likely only once). All data will be written to `data.csv` file
 in the current working directory.
-
-_(NOTE: Since data is downloaded using 16 browser windows - its order might
-differ from the one in this repository. You can check that the data is the same
-by sorting the rows of the csv file)_
 
 ## LICENSE
 
